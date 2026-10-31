@@ -489,8 +489,94 @@ def write_release_notes(release_dir, catalog, rows, branch):
         delete_text += "\n"
     write_text(delete_path, delete_text)
     write_text(log_path, "\n".join(log_parts).rstrip() + "\n")
+    guide_path = release_dir / "README.md"
+    write_text(guide_path, folder_guide(release_dir, branch))
     print(f"wrote {delete_path}", file=sys.stderr)
     print(f"wrote {log_path}", file=sys.stderr)
+    print(f"wrote {guide_path}", file=sys.stderr)
+
+
+def state_excerpt(release_dir, name):
+    path = release_dir / "state" / name
+    if not path.is_file():
+        return f"`state/{name}` is not in this folder yet."
+    body = path.read_text().rstrip()
+    if not body:
+        return f"`state/{name}` is empty."
+    return f"`state/{name}`:\n\n```\n{body}\n```"
+
+
+def folder_guide(release_dir, branch):
+    date_text = branch[len("release-"):]
+    script = ".cursor/skills/release-workflow/scripts/release.sh"
+    return f"""# {branch}
+
+This folder is the record of one staging release. `cut` and `staging` rewrite this file, `delete-remote-branches.sh`, and `branch-log.txt`. The release script does not run the delete script.
+
+## release.env
+
+`date={date_text}`. The script creates this file. Leave it in place.
+
+## state/eligible.txt
+
+One row per catalog app: id, status, the previous `origin/release-*`, and `origin/HEAD`. `eligible` means that app has a `{branch}` branch. `unchanged` means it does not. `no-remote-release-branch` means no older remote release branch was found.
+
+`eligible` will not recompute this file while `state/cut-local.txt`, `state/cut.txt`, `state/staging-local.txt`, or `state/staging.txt` exists. Delete `state/` before a new eligibility pass. That also drops the already-created record, so the next `cut` prints `created` again.
+
+{state_excerpt(release_dir, "eligible.txt")}
+
+## state/cut-local.txt
+
+Dry-run record for app repos. `created` plus a commit is the first local branch. `already-created` means a later `cut` found that line and left the local branch in place.
+
+{state_excerpt(release_dir, "cut-local.txt")}
+
+## state/cut.txt
+
+Push record. `pushed` or `already-pushed`. Written only by `cut --push`.
+
+{state_excerpt(release_dir, "cut.txt")}
+
+## state/staging-local.txt and state/staging.txt
+
+Same pattern for each k8s family. `skipped-no-eligible-images` means that overlay was left unchanged. `staging-local.txt` is the dry run. `staging.txt` is the push.
+
+{state_excerpt(release_dir, "staging-local.txt")}
+
+{state_excerpt(release_dir, "staging.txt")}
+
+## delete-remote-branches.sh
+
+Deletes `origin/{branch}`. One `cd` and one `git push origin :{branch}` per repo marked `eligible`, then a k8s repo when that clone already has `{branch}`.
+
+Read `branch-log.txt` before running it. The release script never runs this file. Run it yourself when those remote branches should be removed:
+
+```bash
+sh releases/{date_text}/delete-remote-branches.sh
+```
+
+## branch-log.txt
+
+`git log --oneline <default>...{branch}` for each eligible repo. `<default>` is the `origin/HEAD` name from `state/eligible.txt`. The release branch is cut at that ref, so the log is empty when the two refs match. The next command is the previous `origin/release-*` against `{branch}`, which lists the commits that made the repo eligible. A k8s section uses `origin/staging` on the left.
+
+## Run again
+
+Refresh this folder without recomputing eligibility:
+
+```bash
+{script} {date_text} cut
+{script} {date_text} staging
+```
+
+Publish the local branches:
+
+```bash
+{script} {date_text} cut --push
+{script} {date_text} staging --push
+```
+
+`staging --push` runs only after every eligible app branch is listed in `state/cut.txt`.
+"""
 
 
 def cmd_cut(release_dir, catalog, release, push):

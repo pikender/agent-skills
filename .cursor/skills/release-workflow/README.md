@@ -43,9 +43,11 @@ Two prompts. The first is the dry run above. After inspecting the local branches
 
 A finished dry run does not count as a push. A finished push is a no-op.
 
-## Delete list and branch log
+## Release folder
 
-Every `cut` and every `staging` rewrites these files for that date. A finished run still rewrites them.
+Every `cut` and every `staging` rewrites `releases/YYYY-MM-DD/README.md`. That file says what else is in the folder, why it is there, and how to use it. A finished run still rewrites it. The 2026-11-03 copy is [README.md](../../../releases/2026-11-03/README.md).
+
+Every `cut` and every `staging` also rewrites the delete list and the branch log. A finished run still rewrites them.
 
 `releases/YYYY-MM-DD/delete-remote-branches.sh` lists one `cd` and one delete per eligible app:
 
