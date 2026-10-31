@@ -10,9 +10,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-STORY_RE = re.compile(
-    r"^[A-Z][A-Z0-9]*-[0-9]+-[A-Z]+-[a-z0-9]+(?:-[a-z0-9]+)*$"
-)
 RELEASE_REF_RE = re.compile(
     r"^refs/remotes/origin/release-(\d{4}-\d{2}-\d{2})$"
 )
@@ -124,7 +121,34 @@ def load_catalog():
     return parse_catalog(path.read_text())
 
 
-def parse_release_env(path):
+def parse_date(text):
+    try:
+        day = datetime.datetime.strptime(text, "%Y-%m-%d").date()
+    except ValueError:
+        die("date must be YYYY-MM-DD")
+    return day
+
+
+def releases_root():
+    override = os.environ.get("RELEASE_ROOT")
+    if override:
+        return Path(override)
+    return SKILL_DIR.parents[2] / "releases"
+
+
+def ensure_release_dir(date_text):
+    root = releases_root()
+    if not root.is_dir():
+        die(f"releases directory not found: {root}")
+    release_dir = root / date_text
+    release_dir.mkdir(exist_ok=True)
+    env_path = release_dir / "release.env"
+    if not env_path.is_file():
+        env_path.write_text(f"date={date_text}\n")
+    return release_dir
+
+
+def parse_release_env(path, date_text):
     if not path.is_file():
         die(f"release.env not found: {path}")
     values = {}
@@ -139,21 +163,13 @@ def parse_release_env(path):
         if key in values:
             die(f"duplicate release.env key: {key}")
         values[key] = value
-    story = values.get("story", "")
-    date_text = values.get("date", "")
-    extra = set(values) - {"story", "date"}
+    extra = set(values) - {"date"}
     if extra:
         die(f"unknown release.env keys: {', '.join(sorted(extra))}")
-    if not STORY_RE.match(story):
-        die(
-            "story must match JIRA_ID-AUTHOR_INITIALS-short-summary, "
-            "for example WMARCH-1293-PK-brotli-security-fix"
-        )
-    try:
-        date = datetime.datetime.strptime(date_text, "%Y-%m-%d").date()
-    except ValueError:
-        die("date must be YYYY-MM-DD")
-    return {"story": story, "date": date, "date_text": date_text}
+    date = parse_date(values.get("date", ""))
+    if date.isoformat() != date_text:
+        die(f"release.env date is {date.isoformat()}, expected {date_text}")
+    return {"date": date, "date_text": date.isoformat(), "branch": f"release-{date.isoformat()}"}
 
 
 def parse_day(text):
@@ -380,18 +396,18 @@ def overlay_text(repo, overlay):
     return result.stdout
 
 
-def push_staging_family(family, entry, story, tags, message):
+def push_staging_family(family, entry, branch, tags, message):
     repo = entry["path"]
     require_repo(repo)
     git(repo, ["fetch", "origin", "--prune"])
     staging = git(repo, ["rev-parse", "-q", "--verify", "refs/remotes/origin/staging"], check=False)
     if staging.returncode != 0:
         die(f"origin/staging is missing in {repo}")
-    if remote_sha(repo, story):
-        die(f"origin/{story} already exists in {repo}; not overwriting it")
-    local = git(repo, ["show-ref", "--verify", "--quiet", f"refs/heads/{story}"], check=False)
+    if remote_sha(repo, branch):
+        die(f"origin/{branch} already exists in {repo}; not overwriting it")
+    local = git(repo, ["show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], check=False)
     if local.returncode == 0:
-        die(f"local branch {story} already exists in {repo}")
+        die(f"local branch {branch} already exists in {repo}")
     original = overlay_text(repo, entry["overlay"])
     updated = update_overlay(original, tags)
     if updated == original or updated == original + "\n" or original == updated + "\n":
@@ -399,14 +415,14 @@ def push_staging_family(family, entry, story, tags, message):
     work = Path(tempfile.mkdtemp(prefix=f"release-{family}-"))
     pushed = False
     try:
-        git(repo, ["worktree", "add", "-b", story, str(work), "origin/staging"])
+        git(repo, ["worktree", "add", "-b", branch, str(work), "origin/staging"])
         target = work / entry["overlay"]
         if not target.is_file():
             die(f"overlay missing in {repo}: {entry['overlay']}")
         target.write_text(updated)
         git(work, ["add", "--", entry["overlay"]])
         git(work, ["commit", "-m", message])
-        git(work, ["push", "-u", "origin", story])
+        git(work, ["push", "-u", "origin", branch])
         pushed = True
     finally:
         git(repo, ["worktree", "remove", "--force", str(work)], check=False)
@@ -415,11 +431,11 @@ def push_staging_family(family, entry, story, tags, message):
         if not pushed:
             exists = git(
                 repo,
-                ["show-ref", "--verify", "--quiet", f"refs/heads/{story}"],
+                ["show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
                 check=False,
             )
             if exists.returncode == 0:
-                git(repo, ["branch", "-D", story], check=False)
+                git(repo, ["branch", "-D", branch], check=False)
     return "pushed"
 
 
@@ -448,14 +464,14 @@ def cmd_staging(release_dir, catalog, release):
             if not images:
                 print(f"{family}\tskipped-no-eligible-images")
             else:
-                print(f"{family}\talready-pushed\t{release['story']}")
+                print(f"{family}\talready-pushed\t{release['branch']}")
         sys.stdout.flush()
         print("staging already complete", file=sys.stderr)
         return
     message = f"Set staging image tags for release-{release['date_text']}"
     for family, images in families:
         if family in done:
-            print(f"{family}\talready-pushed\t{release['story']}")
+            print(f"{family}\talready-pushed\t{release['branch']}")
             continue
         if not images:
             print(f"{family}\tskipped-no-eligible-images")
@@ -463,29 +479,29 @@ def cmd_staging(release_dir, catalog, release):
             write_text(paths["staging"], "".join(f"{item}\n" for item in done))
             continue
         result = push_staging_family(
-            family, catalog["k8s"][family], release["story"], images, message
+            family, catalog["k8s"][family], release["branch"], images, message
         )
         done.add(family)
         write_text(paths["staging"], "".join(f"{item}\n" for item in done))
-        print(f"{family}\t{result}\t{release['story']}")
+        print(f"{family}\t{result}\t{release['branch']}")
 
 
 def usage():
     die(
-        "usage: release.sh <release-dir> <eligible|cut|staging>"
+        "usage: release.sh <YYYY-MM-DD> <eligible|cut|staging>"
     )
 
 
 def main(argv):
     if len(argv) != 2:
         usage()
-    release_dir = Path(argv[0]).resolve()
+    date_text = argv[0]
     step = argv[1]
     if step not in ("eligible", "cut", "staging"):
         usage()
-    if not release_dir.is_dir():
-        die(f"release directory not found: {release_dir}")
-    release = parse_release_env(release_dir / "release.env")
+    parse_date(date_text)
+    release_dir = ensure_release_dir(date_text)
+    release = parse_release_env(release_dir / "release.env", date_text)
     catalog = load_catalog()
     if step == "eligible":
         cmd_eligible(release_dir, catalog, release)
