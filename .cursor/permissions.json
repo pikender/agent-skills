@@ -1,0 +1,14 @@
+{
+  "terminalAllowlist": [
+    ".cursor/skills/release-workflow/scripts/release.sh",
+    "bash .cursor/skills/release-workflow/scripts/release.sh"
+  ],
+  "autoRun": {
+    "allow_instructions": [
+      "Running .cursor/skills/release-workflow/scripts/release.sh is expected. It may git fetch, create local release branches, and git push only when the command includes --push."
+    ],
+    "block_instructions": [
+      "Git push --force and git reset --hard should go through approval first."
+    ]
+  }
+}

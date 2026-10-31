@@ -43,17 +43,19 @@ Two prompts. The first is the dry run above. After inspecting the local branches
 
 A finished dry run does not count as a push. A finished push is a no-op.
 
-## Delete remote branches
+## Delete list and branch log
 
-`releases/YYYY-MM-DD/delete-remote-branches.sh` lists one `cd` and one delete per branch that was pushed:
+Every `cut` and every `staging` rewrites these files for that date. A finished run still rewrites them.
+
+`releases/YYYY-MM-DD/delete-remote-branches.sh` lists one `cd` and one delete per eligible app:
 
 ```bash
 cd /path/to/repo
 git push origin :release-YYYY-MM-DD
 ```
 
-App entries come from rows marked `eligible` in `releases/YYYY-MM-DD/state/eligible.txt`. A k8s repo is included when that staging branch was pushed. The file is not run by the skill.
+Rows come from `eligible` in `state/eligible.txt`. A k8s repo is included only when that clone already has `release-YYYY-MM-DD`. The skill does not run this file.
 
-`releases/YYYY-MM-DD/branch-log.txt` records `git log --oneline <default>...release-YYYY-MM-DD` for each eligible repo. The release branch is cut at `origin/HEAD`, so that range is empty when the two refs match. The file then logs the previous `origin/release-YYYY-MM-DD` against this release branch.
+`releases/YYYY-MM-DD/branch-log.txt` records `git log --oneline <default>...release-YYYY-MM-DD` for each eligible repo. The release branch is cut at `origin/HEAD`, so that range is empty when the two refs match. The file then logs the previous `origin/release-YYYY-MM-DD` against this release branch. A k8s section uses `origin/staging` on the left.
 
-For 2026-11-03 those files are [delete-remote-branches.sh](../../../releases/2026-11-03/delete-remote-branches.sh) and [branch-log.txt](../../../releases/2026-11-03/branch-log.txt). `insights-k8s` has no `release-2026-11-03` branch.
+The 2026-11-03 copies are [delete-remote-branches.sh](../../../releases/2026-11-03/delete-remote-branches.sh) and [branch-log.txt](../../../releases/2026-11-03/branch-log.txt).

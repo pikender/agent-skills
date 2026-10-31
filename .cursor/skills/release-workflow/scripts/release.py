@@ -372,6 +372,111 @@ def cut_satisfied(app_id, push, local_ids, pushed_ids):
     return not push and app_id in local_ids
 
 
+def branch_ref(repo, branch):
+    if local_sha(repo, branch):
+        return branch
+    if remote_sha(repo, branch):
+        return f"origin/{branch}"
+    return None
+
+
+def oneline_log(repo, left, right):
+    result = git(repo, ["log", "--oneline", f"{left}...{right}"], check=False)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise GitError(f"git log failed in {repo}: {detail}")
+    text = result.stdout.strip()
+    if text:
+        return text
+    sha = git(repo, ["rev-parse", right]).stdout.strip()
+    return f"(no commits; {left} and {right} are both {sha})"
+
+
+def release_targets(catalog, rows, branch):
+    by_id = {app["id"]: app for app in catalog["apps"]}
+    targets = []
+    seen = set()
+    for row in rows:
+        if row["status"] != "eligible":
+            continue
+        app = by_id.get(row["id"])
+        if app is None:
+            die(f"{row['id']} is in state/eligible.txt and not in the catalog")
+        path = app["path"]
+        if path in seen:
+            continue
+        seen.add(path)
+        targets.append(
+            {
+                "id": row["id"],
+                "path": path,
+                "left": row["default"],
+                "previous": row["reference"],
+                "kind": "app",
+            }
+        )
+    for family, entry in catalog["k8s"].items():
+        path = entry["path"]
+        if path in seen or branch_ref(path, branch) is None:
+            continue
+        seen.add(path)
+        targets.append(
+            {
+                "id": family,
+                "path": path,
+                "left": "origin/staging",
+                "previous": "",
+                "kind": "k8s",
+            }
+        )
+    return targets
+
+
+def write_release_notes(release_dir, catalog, rows, branch):
+    targets = release_targets(catalog, rows, branch)
+    delete_chunks = []
+    log_parts = [
+        branch,
+        "Repos marked eligible in state/eligible.txt.",
+        "Each app release branch is cut at origin/HEAD, so the default branch and this release branch match when the first log is empty.",
+        "The second log is the previous origin/release branch against this release branch.",
+        "",
+    ]
+    for target in targets:
+        path = target["path"]
+        require_repo(path)
+        delete_chunks.append(f"cd {path}\ngit push origin :{branch}\n")
+        ref = branch_ref(path, branch)
+        log_parts.append(target["id"])
+        log_parts.append(path)
+        log_parts.append("")
+        if target["kind"] == "k8s":
+            log_parts.append("Created from origin/staging.")
+            log_parts.append("")
+        if ref is None:
+            log_parts.append(f"git log --oneline {target['left']}...{branch}")
+            log_parts.append(f"({branch} is not in this clone)")
+            log_parts.append("")
+            continue
+        log_parts.append(f"git log --oneline {target['left']}...{ref}")
+        log_parts.append(oneline_log(path, target["left"], ref))
+        log_parts.append("")
+        previous = target["previous"]
+        if previous and previous != "-":
+            log_parts.append(f"git log --oneline {previous}...{ref}")
+            log_parts.append(oneline_log(path, previous, ref))
+            log_parts.append("")
+    delete_path = release_dir / "delete-remote-branches.sh"
+    log_path = release_dir / "branch-log.txt"
+    delete_text = "\n".join(delete_chunks)
+    if delete_text and not delete_text.endswith("\n"):
+        delete_text += "\n"
+    write_text(delete_path, delete_text)
+    write_text(log_path, "\n".join(log_parts).rstrip() + "\n")
+    print(f"wrote {delete_path}", file=sys.stderr)
+    print(f"wrote {log_path}", file=sys.stderr)
+
+
 def cmd_cut(release_dir, catalog, release, push):
     paths = state_paths(release_dir)
     if not paths["eligible"].is_file():
@@ -391,6 +496,7 @@ def cmd_cut(release_dir, catalog, release, push):
             print(f"{row['id']}\t{label}\t{branch}")
         sys.stdout.flush()
         print("cut already complete", file=sys.stderr)
+        write_release_notes(release_dir, catalog, rows, branch)
         return
     for row in eligible:
         if cut_satisfied(row["id"], push, local_ids, pushed_ids):
@@ -412,6 +518,7 @@ def cmd_cut(release_dir, catalog, release, push):
             sha = create_local_release_branch(app["path"], base, branch)
             local_ids = append_id(paths["cut_local"], local_ids, row["id"])
             print(f"{row['id']}\tcreated\t{branch}\t{sha}")
+    write_release_notes(release_dir, catalog, rows, branch)
 
 
 def update_overlay(text, tags):
@@ -572,6 +679,7 @@ def cmd_staging(release_dir, catalog, release, push):
                 print(f"{family}\t{label}\t{release['branch']}")
         sys.stdout.flush()
         print("staging already complete", file=sys.stderr)
+        write_release_notes(release_dir, catalog, rows, release["branch"])
         return
     message = f"Set staging image tags for release-{release['date_text']}"
     for family, images in families:
@@ -593,6 +701,7 @@ def cmd_staging(release_dir, catalog, release, push):
         if push:
             pushed_done = record_family(paths["staging"], pushed_done, family)
         print(f"{family}\t{result}\t{release['branch']}")
+    write_release_notes(release_dir, catalog, rows, release["branch"])
 
 
 def usage():
