@@ -259,7 +259,31 @@ def read_rows(path):
 def read_ids(path):
     if not path.is_file():
         return []
-    return [line.strip() for line in path.read_text().splitlines() if line.strip()]
+    ids = []
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        ids.append(line.split("\t", 1)[0])
+    return ids
+
+
+def upsert_status(path, name, line):
+    lines = []
+    if path.is_file():
+        lines = [item.strip() for item in path.read_text().splitlines() if item.strip()]
+    replaced = False
+    out = []
+    for existing in lines:
+        if existing.split("\t", 1)[0] == name:
+            out.append(line)
+            replaced = True
+        else:
+            out.append(existing)
+    if not replaced:
+        out.append(line)
+    write_text(path, "".join(f"{item}\n" for item in out))
+    return [item.split("\t", 1)[0] for item in out]
 
 
 def write_text(path, text):
@@ -356,14 +380,6 @@ def push_release_branch(repo, base_ref, branch):
     refuse_non_fast_forward(repo, existing, sha, branch, base_ref)
     git(repo, ["push", "origin", f"refs/heads/{branch}:refs/heads/{branch}"])
     return sha
-
-
-def append_id(path, items, item):
-    if item in items:
-        return items
-    items.append(item)
-    write_text(path, "".join(f"{name}\n" for name in items))
-    return items
 
 
 def cut_satisfied(app_id, push, local_ids, pushed_ids):
@@ -494,6 +510,8 @@ def cmd_cut(release_dir, catalog, release, push):
         for row in eligible:
             label = "already-pushed" if row["id"] in pushed_ids else "already-created"
             print(f"{row['id']}\t{label}\t{branch}")
+            record = paths["cut"] if label == "already-pushed" else paths["cut_local"]
+            upsert_status(record, row["id"], f"{row['id']}\t{label}\t{branch}")
         sys.stdout.flush()
         print("cut already complete", file=sys.stderr)
         write_release_notes(release_dir, catalog, rows, branch)
@@ -502,6 +520,8 @@ def cmd_cut(release_dir, catalog, release, push):
         if cut_satisfied(row["id"], push, local_ids, pushed_ids):
             label = "already-pushed" if row["id"] in pushed_ids else "already-created"
             print(f"{row['id']}\t{label}\t{branch}")
+            record = paths["cut"] if label == "already-pushed" else paths["cut_local"]
+            upsert_status(record, row["id"], f"{row['id']}\t{label}\t{branch}")
             continue
         app = by_id.get(row["id"])
         if app is None:
@@ -511,12 +531,14 @@ def cmd_cut(release_dir, catalog, release, push):
         base = default_ref(app["path"])
         if push:
             sha = push_release_branch(app["path"], base, branch)
-            local_ids = append_id(paths["cut_local"], local_ids, row["id"])
-            pushed_ids = append_id(paths["cut"], pushed_ids, row["id"])
+            upsert_status(paths["cut_local"], row["id"], f"{row['id']}\tcreated\t{branch}\t{sha}")
+            pushed_ids = upsert_status(paths["cut"], row["id"], f"{row['id']}\tpushed\t{branch}\t{sha}")
             print(f"{row['id']}\tpushed\t{branch}\t{sha}")
         else:
             sha = create_local_release_branch(app["path"], base, branch)
-            local_ids = append_id(paths["cut_local"], local_ids, row["id"])
+            local_ids = upsert_status(
+                paths["cut_local"], row["id"], f"{row['id']}\tcreated\t{branch}\t{sha}"
+            )
             print(f"{row['id']}\tcreated\t{branch}\t{sha}")
     write_release_notes(release_dir, catalog, rows, branch)
 
@@ -626,9 +648,9 @@ def prepare_staging_family(family, entry, branch, tags, message, push):
                 git(repo, ["branch", "-D", branch], check=False)
 
 
-def record_family(path, done, family):
+def record_family(path, done, family, line):
+    upsert_status(path, family, line)
     done.add(family)
-    write_text(path, "".join(f"{item}\n" for item in done))
     return done
 
 
@@ -674,9 +696,25 @@ def cmd_staging(release_dir, catalog, release, push):
         for family, images in families:
             if not images:
                 print(f"{family}\tskipped-no-eligible-images")
+                record_family(
+                    paths["staging_local"],
+                    local_done,
+                    family,
+                    f"{family}\tskipped-no-eligible-images",
+                )
+                if push:
+                    record_family(
+                        paths["staging"],
+                        pushed_done,
+                        family,
+                        f"{family}\tskipped-no-eligible-images",
+                    )
             else:
                 label = "already-pushed" if family in pushed_done else "already-created"
                 print(f"{family}\t{label}\t{release['branch']}")
+                record = paths["staging"] if label == "already-pushed" else paths["staging_local"]
+                done = pushed_done if label == "already-pushed" else local_done
+                record_family(record, done, family, f"{family}\t{label}\t{release['branch']}")
         sys.stdout.flush()
         print("staging already complete", file=sys.stderr)
         write_release_notes(release_dir, catalog, rows, release["branch"])
@@ -686,20 +724,43 @@ def cmd_staging(release_dir, catalog, release, push):
         if not images:
             print(f"{family}\tskipped-no-eligible-images")
             if family not in local_done:
-                local_done = record_family(paths["staging_local"], local_done, family)
+                local_done = record_family(
+                    paths["staging_local"],
+                    local_done,
+                    family,
+                    f"{family}\tskipped-no-eligible-images",
+                )
             if push and family not in pushed_done:
-                pushed_done = record_family(paths["staging"], pushed_done, family)
+                pushed_done = record_family(
+                    paths["staging"],
+                    pushed_done,
+                    family,
+                    f"{family}\tskipped-no-eligible-images",
+                )
             continue
         if staging_satisfied(family, push, local_done, pushed_done):
             label = "already-pushed" if family in pushed_done else "already-created"
             print(f"{family}\t{label}\t{release['branch']}")
+            record = paths["staging"] if label == "already-pushed" else paths["staging_local"]
+            done = pushed_done if label == "already-pushed" else local_done
+            record_family(record, done, family, f"{family}\t{label}\t{release['branch']}")
             continue
         result = prepare_staging_family(
             family, catalog["k8s"][family], release["branch"], images, message, push
         )
-        local_done = record_family(paths["staging_local"], local_done, family)
+        local_done = record_family(
+            paths["staging_local"],
+            local_done,
+            family,
+            f"{family}\t{result}\t{release['branch']}",
+        )
         if push:
-            pushed_done = record_family(paths["staging"], pushed_done, family)
+            pushed_done = record_family(
+                paths["staging"],
+                pushed_done,
+                family,
+                f"{family}\t{result}\t{release['branch']}",
+            )
         print(f"{family}\t{result}\t{release['branch']}")
     write_release_notes(release_dir, catalog, rows, release["branch"])
 
