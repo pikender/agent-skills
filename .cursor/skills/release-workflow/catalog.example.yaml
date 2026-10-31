@@ -1,0 +1,32 @@
+# Copy this file to catalog.yaml and fill in your paths.
+# See SKILL.md Setup section for details.
+#
+# k8s: one entry per kubernetes repo family.
+#   path:       local clone of the k8s repo
+#   overlay:    path inside that repo to the staging kustomization.yaml
+#   tag_prefix: image tag prefix written into the overlay
+#
+# apps: one entry per application repo.
+#   id:     unique identifier (used in state files and logs)
+#   path:   local clone of the app repo
+#   family: must match a key under k8s
+#   image:  (optional) full image name in the overlay; omit for repos
+#           that get a release branch but do not publish a Docker image
+
+k8s:
+  platform:
+    path: ~/repos/your-org/platform-k8s
+    overlay: kustomizations/overlays/staging/kustomization.yaml
+    tag_prefix: 0.0.1-release-
+
+apps:
+  # App that publishes a Docker image — newTag is updated in the overlay
+  - id: my-service
+    path: ~/repos/your-org/my-service
+    family: platform
+    image: registry.example.com/your-org/my-service
+
+  # App with no image — gets a release branch but does not update the overlay
+  - id: my-scripts
+    path: ~/repos/your-org/my-scripts
+    family: platform
