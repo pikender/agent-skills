@@ -7,3 +7,6 @@ releases/
 
 # Local notes and chat-log artifacts — not part of the published skill
 scratchpad/
+
+# Repo-specific privacy patterns — contains real internal names, never publish
+.privacy-patterns.yaml
