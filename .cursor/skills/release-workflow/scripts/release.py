@@ -59,6 +59,21 @@ def catalog_path():
     return SKILL_DIR / "catalog.yaml"
 
 
+def _catalog_missing_hint(path):
+    example = SKILL_DIR / "catalog.example.yaml"
+    lines = [
+        f"catalog not found: {path}",
+        "",
+        "To set up:",
+        f"  cp {example} {path}",
+        "  # edit catalog.yaml — fill in your repo paths and registry",
+        "",
+        "Or point to an existing file:",
+        "  export RELEASE_CATALOG=/path/to/your/catalog.yaml",
+    ]
+    return "\n".join(lines)
+
+
 def parse_catalog(text):
     k8s = {}
     apps = []
@@ -120,7 +135,7 @@ def parse_catalog(text):
 def load_catalog():
     path = catalog_path()
     if not path.is_file():
-        die(f"catalog not found: {path}")
+        die(_catalog_missing_hint(path))
     return parse_catalog(path.read_text())
 
 

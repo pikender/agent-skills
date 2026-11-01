@@ -33,6 +33,24 @@ The script uses `releases/YYYY-MM-DD`. `releases/` must already exist. The scrip
 
 The candidate repos are [catalog.yaml](catalog.yaml). Do not remove a repo from it to change the result.
 
+## Setup
+
+`catalog.yaml` is not included in the repository — it contains paths and registry coordinates specific to your environment. Create it once before the first run:
+
+```bash
+cp .cursor/skills/release-workflow/catalog.example.yaml \
+   .cursor/skills/release-workflow/catalog.yaml
+# edit catalog.yaml — fill in your repo paths, registry, and k8s overlay locations
+```
+
+To keep the catalog outside the skill folder, set `RELEASE_CATALOG` to any absolute path:
+
+```bash
+export RELEASE_CATALOG=~/my-team/release-catalog.yaml
+```
+
+If `catalog.yaml` is missing and `RELEASE_CATALOG` is not set, the script prints the setup steps above and exits.
+
 ## Steps
 
 1. `eligible` runs `git fetch origin` in each catalog app repo and writes `releases/YYYY-MM-DD/state/eligible.txt`. The reference is the newest `origin/release-YYYY-MM-DD` whose date is before this release date. Local branches are ignored. `git diff --quiet` compares that ref with `origin/HEAD`. A difference means `eligible`. An empty diff means `unchanged` and the current `newTag` stays. No matching remote release branch means `no-remote-release-branch`. Quote this file. Do not edit it.

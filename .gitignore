@@ -1,3 +1,9 @@
 .cursor/plans/
 *.plan*.md
 releases/
+
+# Per-environment skill catalogs — copy from catalog.example.yaml and fill in locally
+.cursor/skills/*/catalog.yaml
+
+# Local notes and chat-log artifacts — not part of the published skill
+scratchpad/
