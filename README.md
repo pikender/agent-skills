@@ -6,9 +6,9 @@ Claude Code skills for release management and pre-push privacy checks.
 
 ### release-workflow
 
-Prepares staging release branches across multiple repos from a single prompt. Fetches each catalog repo, cuts `release-YYYY-MM-DD` branches where `origin/HEAD` differs from the latest release ref, and updates k8s overlay image tags.
+Prepares staging release branches across multiple repos from a single prompt. Fetches each catalog repo, cuts `release-YYYY-MM-DD` branches where `origin/HEAD` differs from the latest release ref, and updates k8s overlay image tags. `drift` compares an existing release branch with the default branch, `refresh` fast-forwards it, and `picks` cherry-picks named commits.
 
-Trigger: ask Claude to _prepare_, _cut_, or _run_ a staging release.
+Trigger: ask Claude to _prepare_, _cut_, or _run_ a staging release, or to check a release branch against master and take named fixes onto it.
 
 See [.cursor/skills/release-workflow/README.md](.cursor/skills/release-workflow/README.md) for usage and [SKILL.md](.cursor/skills/release-workflow/SKILL.md) for the full procedure.
 

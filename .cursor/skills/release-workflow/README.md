@@ -43,6 +43,50 @@ Two prompts. The first is the dry run above. After inspecting the local branches
 
 A finished dry run does not count as a push. A finished push is a no-op.
 
+## See what landed on the default branch
+
+One prompt. Nothing is moved. The script fetches and writes `state/drift.txt`.
+
+> does the 3rd Nov release branch need commits from master?
+
+```bash
+.cursor/skills/release-workflow/scripts/release.sh 2026-11-03 drift
+```
+
+`fast-forward` means every new commit on the default branch can move onto the release branch. `diverged` means both sides have commits. Quote `state/drift.txt`. The incoming commits are in `drift-log.txt`.
+
+## Take every new commit on the default branch
+
+One prompt after drift shows `fast-forward`. Other statuses stay in place. The local release branch moves. The remote stays until a later prompt asks to push.
+
+> fast-forward the 3rd Nov release branch to master
+
+```bash
+.cursor/skills/release-workflow/scripts/release.sh 2026-11-03 refresh
+```
+
+Publish that fast-forward:
+
+> push the 3rd Nov release branch update
+
+```bash
+.cursor/skills/release-workflow/scripts/release.sh 2026-11-03 refresh --push
+```
+
+Image tags stay on the release date. Rebuild the app image from the updated branch.
+
+## Pick named fixes
+
+One prompt. The user names the commits. The script cherry-picks those SHAs and does not choose them.
+
+> pick abc123 onto the 3rd Nov release branch
+
+```bash
+.cursor/skills/release-workflow/scripts/release.sh 2026-11-03 picks --sha abc123
+```
+
+Add `--push` when that same prompt asks to publish the pick. A conflict stops the run. The branch stays at the last applied commit.
+
 ## Release folder
 
 Every `cut` and every `staging` rewrites `releases/YYYY-MM-DD/README.md`. That file says what else is in the folder, why it is there, and how to use it. A finished run still rewrites it. The 2026-11-03 copy is [README.md](../../../releases/2026-11-03/README.md).
